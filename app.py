@@ -1093,9 +1093,25 @@ else:
             y_atual_total = recuperacao_industrial(entradas)
             delta_recup_total = y_atual_total - y_ant_base
 
+            _EXCLUIR_IMPACTO = {
+                'Etanol Anidro', 'Etanol Hidratado', 'Etanol Hidratado Industrial',
+                'Etanol Anidro Europeu', 'Etanol de Segunda',
+                'Teor Alcoólico Etanol Anidro', 'Teor Alcoólico Etanol Hidratado ',
+                'Teor Alcoólico Etanol Hidratado Industrial', 'Teor Alcoólico Etanol Anidro Europeu',
+                'Teor Alcoólico Etanol de 2º',
+                'Levedura Inativa Seca 300 g/kg', 'Levedura Inativa Seca 350 g/kg',
+                'Levedura Inativa Seca 370 g/kg', 'Levedura Inativa Seca 390 g/kg',
+                'Levedura Inativa Seca 400 g/kg',
+                'PC', 'AR Cana (%)', 'Caldo da Cana - Pol', 'Óleo Fúsel',
+                'CANA TOTAL', 'Açúcar Tipo VHP',
+                'AÇÚCAR EM PROCESSO TOTAL (Dia Anterior)', 'ETANOL EM PROCESSO TOTAL (Dia Anterior)',
+            }
+
             impactos_raw = []
             for row in INPUT_ROWS:
                 nome = rotulo(row)
+                if nome in _EXCLUIR_IMPACTO:
+                    continue
                 v_atual_i = entradas.get(row, 0.0)
                 v_ant_i   = entradas_ant.get(row, 0.0)
                 if v_atual_i == v_ant_i:
@@ -1126,22 +1142,27 @@ else:
 
             col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
             with col_kpi1:
-                sinal_tot = "+" if delta_recup_total >= 0 else ""
-                cor_tot = "#48e0b6" if delta_recup_total >= 0 else "#ff7b8a"
-                st.markdown(
-                    f"<div class='kpi'><div class='lbl'>Variação Total Recuperação</div>"
-                    f"<div class='val' style='font-size:2.2rem;background:none;"
-                    f"-webkit-text-fill-color:{cor_tot}'>{sinal_tot}{delta_recup_total:.4f} p.p.</div>"
-                    f"<div class='sub'>{data_ant.strftime('%d/%m/%Y')} → {data_sel.strftime('%d/%m/%Y')}</div></div>",
-                    unsafe_allow_html=True)
+                if impactos:
+                    top1 = impactos[0]
+                    delta_abs_top = top1["delta_abs"]
+                    sinal_tot = "+" if delta_abs_top >= 0 else ""
+                    cor_tot = "#48e0b6" if delta_abs_top >= 0 else "#ff7b8a"
+                    delta_abs_fmt = f"{delta_abs_top:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                    st.markdown(
+                        f"<div class='kpi'><div class='lbl'>Variação do indicador de maior impacto</div>"
+                        f"<div class='val' style='font-size:2.2rem;background:none;"
+                        f"-webkit-text-fill-color:{cor_tot}'>{sinal_tot}{delta_abs_fmt}</div>"
+                        f"<div class='sub'>{top1['indicador']}<br>{data_ant.strftime('%d/%m/%Y')} → {data_sel.strftime('%d/%m/%Y')}</div></div>",
+                        unsafe_allow_html=True)
             with col_kpi2:
                 if impactos:
                     top_imp = impactos[0]
+                    sinal_top = "+" if top_imp["impacto_pp"] >= 0 else ""
+                    top_val_fmt = f"{top_imp['impacto_pp']:.2f}".replace(".", ",")
                     st.markdown(
                         f"<div class='kpi'><div class='lbl'>Maior impacto isolado</div>"
                         f"<div class='val' style='font-size:1.3rem'>{top_imp['indicador']}</div>"
-                        f"<div class='sub'>{'+' if top_imp['impacto_pp']>=0 else ''}"
-                        f"{top_imp['impacto_pp']:.4f} p.p. na recuperação</div></div>",
+                        f"<div class='sub'>{sinal_top}{top_val_fmt}% na recuperação</div></div>",
                         unsafe_allow_html=True)
             with col_kpi3:
                 st.markdown(
@@ -1161,17 +1182,14 @@ else:
                     tag = ("<span class='tag up'>↑</span>" if pos
                            else "<span class='tag down'>↓</span>")
                     sinal = "+" if pos else ""
-                    delta_ind_pos = r["delta_abs"] >= 0
-                    delta_cor = "#48e0b6" if delta_ind_pos else "#ff7b8a"
-                    delta_sinal = "+" if delta_ind_pos else ""
+                    cor_val = "#48e0b6" if pos else "#ff7b8a"
+                    val_fmt = f"{r['impacto_pp']:.2f}".replace(".", ",")
                     html_imp.append(
                         f"<div class='rowit'>"
                         f"<div class='rank'>{i}</div>"
                         f"<div class='name' title=\"{r['indicador']}\">{r['indicador']}{tag}</div>"
                         f"<div class='barwrap'><div class='bar' style='width:{w:.1f}%;background:{grad}'></div></div>"
-                        f"<div class='pct' style='width:110px'>{sinal}{r['impacto_pp']:.4f} p.p.</div>"
-                        f"<div class='pct' style='width:90px;color:{delta_cor};font-size:.82rem'>"
-                        f"Δind {delta_sinal}{r['delta_pct']:.1f}%</div>"
+                        f"<div class='pct' style='width:120px;color:{cor_val}'>{sinal}{val_fmt}%</div>"
                         f"</div>")
                 st.markdown("".join(html_imp), unsafe_allow_html=True)
 
@@ -1183,7 +1201,7 @@ else:
                     f"Valor {data_ant.strftime('%d/%m/%Y')}",
                     f"Valor {data_sel.strftime('%d/%m/%Y')}",
                     "Δ Indicador (abs)", "Δ Indicador (%)",
-                    "Impacto na Recup. (p.p.)"]
+                    "Impacto na Recuperação (%)"]
                 with st.expander("📋 Ver tabela completa de impactos / exportar"):
                     st.dataframe(tab_imp, use_container_width=True, height=420)
                     st.download_button(
