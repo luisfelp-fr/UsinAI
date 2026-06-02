@@ -952,8 +952,7 @@ else:
         sub_ri = df[(df["data"].dt.date == data_sel)]
         if periodo_sel and periodo_sel != "—":
             sub_ri = sub_ri[sub_ri["periodo"] == periodo_sel]
-        mask_ri = sub_ri["metrica_norm"].str.contains("recupera", na=False) & \
-                  sub_ri["metrica_norm"].str.contains("industrial", na=False)
+        mask_ri = sub_ri["metrica_norm"] == "recuperação industrial"
         serie_ri = sub_ri.loc[mask_ri, "valor"].dropna()
         y_planilha = float(serie_ri.mean()) if not serie_ri.empty else None
 
@@ -1144,7 +1143,12 @@ else:
             with col_kpi1:
                 if impactos:
                     top1 = impactos[0]
-                    delta_abs_top = top1["delta_abs"]
+                    if top1["indicador"] == "Quantidade Total Mel Final Tanque Nº5":
+                        delta_abs_top = entradas.get(176, 0.0) - entradas_ant.get(176, 0.0)
+                        lbl_variacao = "Volume Mel Final Tanque Nº5"
+                    else:
+                        delta_abs_top = top1["delta_abs"]
+                        lbl_variacao = top1["indicador"]
                     sinal_tot = "+" if delta_abs_top >= 0 else ""
                     cor_tot = "#48e0b6" if delta_abs_top >= 0 else "#ff7b8a"
                     delta_abs_fmt = f"{delta_abs_top:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -1152,7 +1156,7 @@ else:
                         f"<div class='kpi'><div class='lbl'>Variação do indicador de maior impacto</div>"
                         f"<div class='val' style='font-size:2.2rem;background:none;"
                         f"-webkit-text-fill-color:{cor_tot}'>{sinal_tot}{delta_abs_fmt}</div>"
-                        f"<div class='sub'>{top1['indicador']}<br>{data_ant.strftime('%d/%m/%Y')} → {data_sel.strftime('%d/%m/%Y')}</div></div>",
+                        f"<div class='sub'>{lbl_variacao}<br>{data_ant.strftime('%d/%m/%Y')} → {data_sel.strftime('%d/%m/%Y')}</div></div>",
                         unsafe_allow_html=True)
             with col_kpi2:
                 if impactos:
@@ -1165,10 +1169,20 @@ else:
                         f"<div class='sub'>{sinal_top}{top_val_fmt}% na recuperação</div></div>",
                         unsafe_allow_html=True)
             with col_kpi3:
+                soma_top = sum(r["impacto_pp"] for r in impactos[:topn])
+                rec_ajustada = y_atual_total + soma_top
+                cor_aj = "#48e0b6" if rec_ajustada >= y_atual_total else "#ff7b8a"
+                rec_aj_fmt = f"{rec_ajustada:.2f}".replace(".", ",")
+                ri_fmt = f"{y_atual_total:.2f}".replace(".", ",")
+                sinal_soma = "+" if soma_top >= 0 else ""
+                soma_fmt = f"{soma_top:.2f}".replace(".", ",")
                 st.markdown(
-                    f"<div class='kpi'><div class='lbl'>Indicadores com variação</div>"
-                    f"<div class='val' style='font-size:2.2rem'>{len(impactos)}</div>"
-                    f"<div class='sub'>dos {len(INPUT_ROWS)} indicadores avaliados</div></div>",
+                    f"<div class='kpi'>"
+                    f"<div class='lbl'>Recuperação ajustada</div>"
+                    f"<div class='val' style='font-size:2.2rem;background:none;"
+                    f"-webkit-text-fill-color:{cor_aj}'>{rec_aj_fmt}%</div>"
+                    f"<div class='sub'>{ri_fmt}% base {sinal_soma}{soma_fmt}% (Δ top {topn})</div>"
+                    f"</div>",
                     unsafe_allow_html=True)
 
             if impactos:
