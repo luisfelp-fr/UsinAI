@@ -764,7 +764,7 @@ def calcular(entradas):
 def rotulo(row):
     """Nome 'limpo' do indicador para exibição."""
     nm = ROW_NAME.get(row, f"Linha {row}")
-    return str(nm).replace("\u200e", "").strip()
+    return str(nm).replace("‎", "").strip()
 
 
 def recuperacao_industrial(entradas):
@@ -956,6 +956,17 @@ else:
         serie_ri = sub_ri.loc[mask_ri, "valor"].dropna()
         y_planilha = float(serie_ri.mean()) if not serie_ri.empty else None
 
+        # Dados do dia anterior (compartilhados entre as seções)
+        datas_periodo = sorted(df[df["periodo"] == periodo_sel]["data"].dt.date.unique())
+        idx_sel = datas_periodo.index(data_sel) if data_sel in datas_periodo else -1
+        if idx_sel > 0:
+            data_ant = datas_periodo[idx_sel - 1]
+            entradas_ant, _ = valores_para_data(df, data_ant, periodo_sel)
+        else:
+            data_ant = None
+            entradas_ant = {}
+
+        # KPI cards globais
         c1, c2, c3 = st.columns([1.4, 1, 1])
         with c1:
             val_exib = y_planilha if y_planilha is not None else y0
@@ -978,121 +989,263 @@ else:
                         f"<div class='sub'>choque de ±{choque*100:.1f}% cada</div></div>",
                         unsafe_allow_html=True)
 
-        st.markdown("### 🏆 Ranking de influência")
-        st.markdown("<p class='legend'>Largura da barra = participação no impacto total. "
-                    "<span class='tag up'>↑ aumenta</span> ou "
-                    "<span class='tag down'>↓ reduz</span> a recuperação ao crescer o indicador.</p>",
-                    unsafe_allow_html=True)
+        # ── ABAS ──────────────────────────────────────────────────────────────
+        tab_analise, tab_sim = st.tabs(["📊 Análise de Sensibilidade", "🎛️ Simulador de Indicadores"])
 
-        vmax = max((r["influencia"] for r in res[:topn]), default=1) or 1
-        html = []
-        for i, r in enumerate(res[:topn], 1):
-            w = r["influencia"] / vmax * 100
-            pos = r["delta_pp"] >= 0
-            grad = ("linear-gradient(90deg,#1f8f7f,#3dd6c4)" if pos
-                    else "linear-gradient(90deg,#a83246,#ff7b8a)")
-            tag = ("<span class='tag up'>↑</span>" if pos else "<span class='tag down'>↓</span>")
-            html.append(
-                f"<div class='rowit'><div class='rank'>{i}</div>"
-                f"<div class='name' title=\"{r['indicador']}\">{r['indicador']}{tag}</div>"
-                f"<div class='barwrap'><div class='bar' style='width:{w:.1f}%;background:{grad}'></div></div>"
-                f"<div class='pct'>{r['influencia']:.1f}%</div></div>")
-        st.markdown("".join(html), unsafe_allow_html=True)
+        # ══════════════════════════════════════════════════════════════════════
+        with tab_analise:
+            st.markdown("### 🏆 Ranking de influência")
+            st.markdown("<p class='legend'>Largura da barra = participação no impacto total. "
+                        "<span class='tag up'>↑ aumenta</span> ou "
+                        "<span class='tag down'>↓ reduz</span> a recuperação ao crescer o indicador.</p>",
+                        unsafe_allow_html=True)
 
-        tab = pd.DataFrame(res)[["indicador", "valor_base", "delta_pp", "elasticidade", "influencia"]]
-        tab.columns = ["Indicador", "Valor base", "Δ Recup. (p.p.)", "Elasticidade", "Influência (%)"]
-        with st.expander("📋 Ver tabela completa / exportar"):
-            st.dataframe(tab, use_container_width=True, height=420)
-            st.download_button("⬇️ Baixar ranking (CSV)", tab.to_csv(index=False).encode("utf-8"),
-                               f"ranking_{data_sel}.csv", "text/csv")
-
-        if faltando:
-            with st.expander(f"⚠️ {len(faltando)} indicador(es) sem dado nesta data (tratados como 0)"):
-                st.write(", ".join(faltando))
-
-        # ── Ranking de variação dia anterior ─────────────────────────────────
-        st.markdown("---")
-        st.markdown("### 📅 Variação em relação ao dia anterior")
-
-        datas_periodo = sorted(df[df["periodo"] == periodo_sel]["data"].dt.date.unique())
-        idx_sel = datas_periodo.index(data_sel) if data_sel in datas_periodo else -1
-
-        if idx_sel <= 0:
-            st.info("Não há data anterior disponível para o período selecionado.")
-        else:
-            data_ant = datas_periodo[idx_sel - 1]
-            entradas_ant, _ = valores_para_data(df, data_ant, periodo_sel)
-
-            deltas_raw = []
-            for row in INPUT_ROWS:
-                nome = rotulo(row)
-                v_atual = entradas.get(row, 0.0)
-                v_ant   = entradas_ant.get(row, 0.0)
-                diff    = v_atual - v_ant
-                pct     = diff / abs(v_ant) * 100 if v_ant != 0 else 0.0
-                deltas_raw.append({"linha": row, "indicador": nome,
-                                   "valor_atual": v_atual, "valor_anterior": v_ant,
-                                   "delta_abs": diff, "delta_pct": pct})
-
-            seen = {}
-            for r in deltas_raw:
-                nome = r["indicador"]
-                if nome not in seen or abs(r["delta_abs"]) > abs(seen[nome]["delta_abs"]):
-                    seen[nome] = r
-            deltas = list(seen.values())
-
-            deltas.sort(key=lambda r: abs(r["delta_abs"]), reverse=True)
-
-            st.markdown(
-                f"<p class='legend'>Comparando <b>{data_sel.strftime('%d/%m/%Y')}</b> "
-                f"com <b>{data_ant.strftime('%d/%m/%Y')}</b>. "
-                f"Ordenado pela maior variação absoluta.</p>",
-                unsafe_allow_html=True)
-
-            vmax_d = max((abs(r["delta_abs"]) for r in deltas[:topn]), default=1) or 1
-            html_d = []
-            for i, r in enumerate(deltas[:topn], 1):
-                w = abs(r["delta_abs"]) / vmax_d * 100
-                pos = r["delta_abs"] >= 0
+            vmax = max((r["influencia"] for r in res[:topn]), default=1) or 1
+            html = []
+            for i, r in enumerate(res[:topn], 1):
+                w = r["influencia"] / vmax * 100
+                pos = r["delta_pp"] >= 0
                 grad = ("linear-gradient(90deg,#1f8f7f,#3dd6c4)" if pos
                         else "linear-gradient(90deg,#a83246,#ff7b8a)")
                 tag = ("<span class='tag up'>↑</span>" if pos else "<span class='tag down'>↓</span>")
-                sinal = "+" if pos else ""
-                html_d.append(
-                    f"<div class='rowit'>"
-                    f"<div class='rank'>{i}</div>"
+                html.append(
+                    f"<div class='rowit'><div class='rank'>{i}</div>"
                     f"<div class='name' title=\"{r['indicador']}\">{r['indicador']}{tag}</div>"
                     f"<div class='barwrap'><div class='bar' style='width:{w:.1f}%;background:{grad}'></div></div>"
-                    f"<div class='pct' style='width:90px'>{sinal}{r['delta_abs']:,.2f}</div>"
-                    f"<div class='pct' style='width:72px;color:{'#48e0b6' if pos else '#ff7b8a'}'>"
-                    f"{sinal}{r['delta_pct']:.1f}%</div>"
-                    f"</div>")
-            st.markdown("".join(html_d), unsafe_allow_html=True)
+                    f"<div class='pct'>{r['influencia']:.1f}%</div></div>")
+            st.markdown("".join(html), unsafe_allow_html=True)
 
-            tab_d = pd.DataFrame(deltas)[["indicador", "valor_anterior", "valor_atual", "delta_abs", "delta_pct"]]
-            tab_d.columns = ["Indicador", f"Valor {data_ant.strftime('%d/%m/%Y')}",
-                             f"Valor {data_sel.strftime('%d/%m/%Y')}", "Δ Absoluto", "Δ (%)"]
-            with st.expander("📋 Ver tabela completa de variações / exportar"):
-                st.dataframe(tab_d, use_container_width=True, height=420)
-                st.download_button("⬇️ Baixar variações (CSV)",
-                                   tab_d.to_csv(index=False).encode("utf-8"),
-                                   f"variacao_{data_ant}_{data_sel}.csv", "text/csv")
+            df_rank = pd.DataFrame(res)[["indicador", "valor_base", "delta_pp", "elasticidade", "influencia"]]
+            df_rank.columns = ["Indicador", "Valor base", "Δ Recup. (p.p.)", "Elasticidade", "Influência (%)"]
+            with st.expander("📋 Ver tabela completa / exportar"):
+                st.dataframe(df_rank, use_container_width=True, height=420)
+                st.download_button("⬇️ Baixar ranking (CSV)", df_rank.to_csv(index=False).encode("utf-8"),
+                                   f"ranking_{data_sel}.csv", "text/csv")
 
-            # ── Ranking de impacto na recuperação por variação dia anterior ──────
+            if faltando:
+                with st.expander(f"⚠️ {len(faltando)} indicador(es) sem dado nesta data (tratados como 0)"):
+                    st.write(", ".join(faltando))
+
+            # ── Variação dia anterior ─────────────────────────────────────────
             st.markdown("---")
-            st.markdown("### 📊 Ranking de Impacto na Recuperação Industrial pelas Variações")
+            st.markdown("### 📅 Variação em relação ao dia anterior")
+
+            if idx_sel <= 0:
+                st.info("Não há data anterior disponível para o período selecionado.")
+            else:
+                deltas_raw = []
+                for row in INPUT_ROWS:
+                    nome = rotulo(row)
+                    v_atual = entradas.get(row, 0.0)
+                    v_ant   = entradas_ant.get(row, 0.0)
+                    diff    = v_atual - v_ant
+                    pct     = diff / abs(v_ant) * 100 if v_ant != 0 else 0.0
+                    deltas_raw.append({"linha": row, "indicador": nome,
+                                       "valor_atual": v_atual, "valor_anterior": v_ant,
+                                       "delta_abs": diff, "delta_pct": pct})
+
+                seen = {}
+                for r in deltas_raw:
+                    nome = r["indicador"]
+                    if nome not in seen or abs(r["delta_abs"]) > abs(seen[nome]["delta_abs"]):
+                        seen[nome] = r
+                deltas = list(seen.values())
+                deltas.sort(key=lambda r: abs(r["delta_abs"]), reverse=True)
+
+                st.markdown(
+                    f"<p class='legend'>Comparando <b>{data_sel.strftime('%d/%m/%Y')}</b> "
+                    f"com <b>{data_ant.strftime('%d/%m/%Y')}</b>. "
+                    f"Ordenado pela maior variação absoluta.</p>",
+                    unsafe_allow_html=True)
+
+                vmax_d = max((abs(r["delta_abs"]) for r in deltas[:topn]), default=1) or 1
+                html_d = []
+                for i, r in enumerate(deltas[:topn], 1):
+                    w = abs(r["delta_abs"]) / vmax_d * 100
+                    pos = r["delta_abs"] >= 0
+                    grad = ("linear-gradient(90deg,#1f8f7f,#3dd6c4)" if pos
+                            else "linear-gradient(90deg,#a83246,#ff7b8a)")
+                    tag = ("<span class='tag up'>↑</span>" if pos else "<span class='tag down'>↓</span>")
+                    sinal = "+" if pos else ""
+                    html_d.append(
+                        f"<div class='rowit'>"
+                        f"<div class='rank'>{i}</div>"
+                        f"<div class='name' title=\"{r['indicador']}\">{r['indicador']}{tag}</div>"
+                        f"<div class='barwrap'><div class='bar' style='width:{w:.1f}%;background:{grad}'></div></div>"
+                        f"<div class='pct' style='width:90px'>{sinal}{r['delta_abs']:,.2f}</div>"
+                        f"<div class='pct' style='width:72px;color:{'#48e0b6' if pos else '#ff7b8a'}'>"
+                        f"{sinal}{r['delta_pct']:.1f}%</div>"
+                        f"</div>")
+                st.markdown("".join(html_d), unsafe_allow_html=True)
+
+                df_var = pd.DataFrame(deltas)[["indicador", "valor_anterior", "valor_atual", "delta_abs", "delta_pct"]]
+                df_var.columns = ["Indicador", f"Valor {data_ant.strftime('%d/%m/%Y')}",
+                                  f"Valor {data_sel.strftime('%d/%m/%Y')}", "Δ Absoluto", "Δ (%)"]
+                with st.expander("📋 Ver tabela completa de variações / exportar"):
+                    st.dataframe(df_var, use_container_width=True, height=420)
+                    st.download_button("⬇️ Baixar variações (CSV)",
+                                       df_var.to_csv(index=False).encode("utf-8"),
+                                       f"variacao_{data_ant}_{data_sel}.csv", "text/csv")
+
+                # ── Ranking de impacto na recuperação por variação dia anterior ──
+                st.markdown("---")
+                st.markdown("### 📊 Ranking de Impacto na Recuperação Industrial pelas Variações")
+                st.markdown(
+                    f"<p class='legend'>Para cada indicador, aplica-se isoladamente sua variação "
+                    f"(<b>{data_ant.strftime('%d/%m/%Y')}</b> → <b>{data_sel.strftime('%d/%m/%Y')}</b>) "
+                    f"mantendo os demais na base do dia anterior e mede-se o impacto em pontos percentuais "
+                    f"na Recuperação Industrial.</p>",
+                    unsafe_allow_html=True)
+
+                y_ant_base = recuperacao_industrial(entradas_ant)
+                y_atual_total = recuperacao_industrial(entradas)
+
+                _EXCLUIR_IMPACTO = {
+                    'Etanol Anidro', 'Etanol Hidratado', 'Etanol Hidratado Industrial',
+                    'Etanol Anidro Europeu', 'Etanol de Segunda',
+                    'Teor Alcoólico Etanol Anidro', 'Teor Alcoólico Etanol Hidratado ',
+                    'Teor Alcoólico Etanol Hidratado Industrial', 'Teor Alcoólico Etanol Anidro Europeu',
+                    'Teor Alcoólico Etanol de 2º',
+                    'Levedura Inativa Seca 300 g/kg', 'Levedura Inativa Seca 350 g/kg',
+                    'Levedura Inativa Seca 370 g/kg', 'Levedura Inativa Seca 390 g/kg',
+                    'Levedura Inativa Seca 400 g/kg',
+                    'PC', 'AR Cana (%)', 'Caldo da Cana - Pol', 'Óleo Fúsel',
+                    'CANA TOTAL', 'Açúcar Tipo VHP',
+                    'AÇÚCAR EM PROCESSO TOTAL (Dia Anterior)', 'ETANOL EM PROCESSO TOTAL (Dia Anterior)',
+                }
+
+                impactos_raw = []
+                for row in INPUT_ROWS:
+                    nome = rotulo(row)
+                    if nome in _EXCLUIR_IMPACTO:
+                        continue
+                    v_atual_i = entradas.get(row, 0.0)
+                    v_ant_i   = entradas_ant.get(row, 0.0)
+                    if v_atual_i == v_ant_i:
+                        continue
+                    cenario = dict(entradas_ant)
+                    cenario[row] = v_atual_i
+                    y_mixed = recuperacao_industrial(cenario)
+                    impacto_pp = y_mixed - y_ant_base
+                    delta_i = v_atual_i - v_ant_i
+                    delta_pct_i = delta_i / abs(v_ant_i) * 100 if v_ant_i != 0 else 0.0
+                    impactos_raw.append({
+                        "linha": row, "indicador": nome,
+                        "valor_anterior": v_ant_i, "valor_atual": v_atual_i,
+                        "delta_abs": delta_i, "delta_pct": delta_pct_i,
+                        "impacto_pp": impacto_pp,
+                    })
+
+                seen_imp = {}
+                for r in impactos_raw:
+                    nome = r["indicador"]
+                    if nome not in seen_imp or abs(r["impacto_pp"]) > abs(seen_imp[nome]["impacto_pp"]):
+                        seen_imp[nome] = r
+                impactos = list(seen_imp.values())
+                impactos.sort(key=lambda r: abs(r["impacto_pp"]), reverse=True)
+
+                col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+                with col_kpi1:
+                    if impactos:
+                        top1 = impactos[0]
+                        if top1["indicador"] == "Quantidade Total Mel Final Tanque Nº5":
+                            delta_abs_top = entradas.get(176, 0.0) - entradas_ant.get(176, 0.0)
+                            lbl_variacao = "Volume Mel Final Tanque Nº5"
+                        else:
+                            delta_abs_top = top1["delta_abs"]
+                            lbl_variacao = top1["indicador"]
+                        sinal_tot = "+" if delta_abs_top >= 0 else ""
+                        cor_tot = "#48e0b6" if delta_abs_top >= 0 else "#ff7b8a"
+                        delta_abs_fmt = f"{delta_abs_top:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                        st.markdown(
+                            f"<div class='kpi'><div class='lbl'>Variação do indicador de maior impacto</div>"
+                            f"<div class='val' style='font-size:2.2rem;background:none;"
+                            f"-webkit-text-fill-color:{cor_tot}'>{sinal_tot}{delta_abs_fmt}</div>"
+                            f"<div class='sub'>{lbl_variacao}<br>{data_ant.strftime('%d/%m/%Y')} → {data_sel.strftime('%d/%m/%Y')}</div></div>",
+                            unsafe_allow_html=True)
+                with col_kpi2:
+                    if impactos:
+                        top_imp = impactos[0]
+                        sinal_top = "+" if top_imp["impacto_pp"] >= 0 else ""
+                        top_val_fmt = f"{top_imp['impacto_pp']:.2f}".replace(".", ",")
+                        st.markdown(
+                            f"<div class='kpi'><div class='lbl'>Maior impacto isolado</div>"
+                            f"<div class='val' style='font-size:1.3rem'>{top_imp['indicador']}</div>"
+                            f"<div class='sub'>{sinal_top}{top_val_fmt}% na recuperação</div></div>",
+                            unsafe_allow_html=True)
+                with col_kpi3:
+                    soma_top = sum(r["impacto_pp"] for r in impactos[:topn])
+                    rec_ajustada = y_atual_total + soma_top
+                    cor_aj = "#48e0b6" if rec_ajustada >= y_atual_total else "#ff7b8a"
+                    rec_aj_fmt = f"{rec_ajustada:.2f}".replace(".", ",")
+                    ri_fmt = f"{y_atual_total:.2f}".replace(".", ",")
+                    sinal_soma = "+" if soma_top >= 0 else ""
+                    soma_fmt = f"{soma_top:.2f}".replace(".", ",")
+                    st.markdown(
+                        f"<div class='kpi'>"
+                        f"<div class='lbl'>Recuperação ajustada</div>"
+                        f"<div class='val' style='font-size:2.2rem;background:none;"
+                        f"-webkit-text-fill-color:{cor_aj}'>{rec_aj_fmt}%</div>"
+                        f"<div class='sub'>{ri_fmt}% base {sinal_soma}{soma_fmt}% (Δ top {topn})</div>"
+                        f"</div>",
+                        unsafe_allow_html=True)
+
+                if impactos:
+                    vmax_imp = max((abs(r["impacto_pp"]) for r in impactos[:topn]), default=1) or 1
+                    html_imp = []
+                    for i, r in enumerate(impactos[:topn], 1):
+                        w = abs(r["impacto_pp"]) / vmax_imp * 100
+                        pos = r["impacto_pp"] >= 0
+                        grad = ("linear-gradient(90deg,#1f8f7f,#3dd6c4)" if pos
+                                else "linear-gradient(90deg,#a83246,#ff7b8a)")
+                        tag = ("<span class='tag up'>↑</span>" if pos
+                               else "<span class='tag down'>↓</span>")
+                        sinal = "+" if pos else ""
+                        cor_val = "#48e0b6" if pos else "#ff7b8a"
+                        val_fmt = f"{r['impacto_pp']:.2f}".replace(".", ",")
+                        html_imp.append(
+                            f"<div class='rowit'>"
+                            f"<div class='rank'>{i}</div>"
+                            f"<div class='name' title=\"{r['indicador']}\">{r['indicador']}{tag}</div>"
+                            f"<div class='barwrap'><div class='bar' style='width:{w:.1f}%;background:{grad}'></div></div>"
+                            f"<div class='pct' style='width:120px;color:{cor_val}'>{sinal}{val_fmt}%</div>"
+                            f"</div>")
+                    st.markdown("".join(html_imp), unsafe_allow_html=True)
+
+                    df_imp = pd.DataFrame(impactos)[[
+                        "indicador", "valor_anterior", "valor_atual",
+                        "delta_abs", "delta_pct", "impacto_pp"]]
+                    df_imp.columns = [
+                        "Indicador",
+                        f"Valor {data_ant.strftime('%d/%m/%Y')}",
+                        f"Valor {data_sel.strftime('%d/%m/%Y')}",
+                        "Δ Indicador (abs)", "Δ Indicador (%)",
+                        "Impacto na Recuperação (%)"]
+                    with st.expander("📋 Ver tabela completa de impactos / exportar"):
+                        st.dataframe(df_imp, use_container_width=True, height=420)
+                        st.download_button(
+                            "⬇️ Baixar ranking de impactos (CSV)",
+                            df_imp.to_csv(index=False).encode("utf-8"),
+                            f"impacto_recuperacao_{data_ant}_{data_sel}.csv",
+                            "text/csv")
+                else:
+                    st.info("Nenhuma variação encontrada entre as duas datas para calcular impactos.")
+
+            # ── Ranking de Impacto Acumulado no Mês ──────────────────────────
+            st.markdown("---")
+            st.markdown("### 📈 Análise de Impacto Acumulado no Mês")
+
+            data_inicio_mes = data_sel.replace(day=1)
+            datas_mes = [d for d in datas_periodo if data_inicio_mes <= d <= data_sel]
+
             st.markdown(
-                f"<p class='legend'>Para cada indicador, aplica-se isoladamente sua variação "
-                f"(<b>{data_ant.strftime('%d/%m/%Y')}</b> → <b>{data_sel.strftime('%d/%m/%Y')}</b>) "
-                f"mantendo os demais na base do dia anterior e mede-se o impacto em pontos percentuais "
-                f"na Recuperação Industrial.</p>",
+                f"<p class='legend'>Análise pareada de <b>{data_inicio_mes.strftime('%d/%m/%Y')}</b> "
+                f"a <b>{data_sel.strftime('%d/%m/%Y')}</b>. Para cada par de dias consecutivos, "
+                f"o impacto de cada indicador é medido isoladamente e acumulado ao longo do mês. "
+                f"O ranking final mostra a soma dos impactos na Recuperação Industrial em %.</p>",
                 unsafe_allow_html=True)
 
-            y_ant_base = recuperacao_industrial(entradas_ant)
-            y_atual_total = recuperacao_industrial(entradas)
-            delta_recup_total = y_atual_total - y_ant_base
-
-            _EXCLUIR_IMPACTO = {
+            _EXCLUIR_MES = {
                 'Etanol Anidro', 'Etanol Hidratado', 'Etanol Hidratado Industrial',
                 'Etanol Anidro Europeu', 'Etanol de Segunda',
                 'Teor Alcoólico Etanol Anidro', 'Teor Alcoólico Etanol Hidratado ',
@@ -1106,122 +1259,228 @@ else:
                 'AÇÚCAR EM PROCESSO TOTAL (Dia Anterior)', 'ETANOL EM PROCESSO TOTAL (Dia Anterior)',
             }
 
-            impactos_raw = []
+            if len(datas_mes) < 2:
+                st.info("Não há dados suficientes no mês para calcular o impacto acumulado.")
+            else:
+                with st.spinner("Calculando impacto acumulado no mês…"):
+                    acumulado = {}
+                    for j in range(1, len(datas_mes)):
+                        d_prev = datas_mes[j - 1]
+                        d_curr = datas_mes[j]
+                        ent_prev, _ = valores_para_data(df, d_prev, periodo_sel)
+                        ent_curr, _ = valores_para_data(df, d_curr, periodo_sel)
+                        y_prev = recuperacao_industrial(ent_prev)
+                        par_impacts = {}
+                        for row in INPUT_ROWS:
+                            nome = rotulo(row)
+                            if nome in _EXCLUIR_MES:
+                                continue
+                            v_p = ent_prev.get(row, 0.0)
+                            v_c = ent_curr.get(row, 0.0)
+                            if v_p == v_c:
+                                continue
+                            cenario = dict(ent_prev)
+                            cenario[row] = v_c
+                            impacto = recuperacao_industrial(cenario) - y_prev
+                            if nome not in par_impacts or abs(impacto) > abs(par_impacts[nome]):
+                                par_impacts[nome] = impacto
+                        for nome, impacto in par_impacts.items():
+                            if nome not in acumulado:
+                                acumulado[nome] = {"indicador": nome, "impacto_total": 0.0, "n_pares": 0}
+                            acumulado[nome]["impacto_total"] += impacto
+                            acumulado[nome]["n_pares"] += 1
+
+                ranking_mes = sorted(acumulado.values(),
+                                     key=lambda r: abs(r["impacto_total"]), reverse=True)
+                soma_abs_mes = sum(abs(r["impacto_total"]) for r in ranking_mes) or 1.0
+                for r in ranking_mes:
+                    r["participacao"] = abs(r["impacto_total"]) / soma_abs_mes * 100
+
+                if not ranking_mes:
+                    st.info("Nenhuma variação encontrada no período para calcular impactos acumulados.")
+                else:
+                    col_m1, col_m2, col_m3 = st.columns(3)
+                    with col_m1:
+                        top_m = ranking_mes[0]
+                        cor_m = "#48e0b6" if top_m["impacto_total"] >= 0 else "#ff7b8a"
+                        sinal_m = "+" if top_m["impacto_total"] >= 0 else ""
+                        val_m = f"{top_m['impacto_total']:.2f}".replace(".", ",")
+                        st.markdown(
+                            f"<div class='kpi'><div class='lbl'>Indicador de maior impacto no mês</div>"
+                            f"<div class='val' style='font-size:1.3rem'>{top_m['indicador']}</div>"
+                            f"<div class='sub' style='color:{cor_m}'>{sinal_m}{val_m}% acumulado no mês</div></div>",
+                            unsafe_allow_html=True)
+                    with col_m2:
+                        n_pares_mes = len(datas_mes) - 1
+                        st.markdown(
+                            f"<div class='kpi'><div class='lbl'>Pares de dias analisados</div>"
+                            f"<div class='val' style='font-size:2.5rem'>{n_pares_mes}</div>"
+                            f"<div class='sub'>{datas_mes[0].strftime('%d/%m/%Y')} → "
+                            f"{datas_mes[-1].strftime('%d/%m/%Y')}</div></div>",
+                            unsafe_allow_html=True)
+                    with col_m3:
+                        st.markdown(
+                            f"<div class='kpi'><div class='lbl'>Indicadores com variação no mês</div>"
+                            f"<div class='val' style='font-size:2.5rem'>{len(ranking_mes)}</div>"
+                            f"<div class='sub'>com impacto detectado em ao menos 1 par de dias</div></div>",
+                            unsafe_allow_html=True)
+
+                    st.markdown(
+                        "<div style='display:flex;gap:14px;padding:8px 4px;color:var(--muted);"
+                        "font-size:.8rem;margin-top:14px;border-bottom:1px solid #28304180'>"
+                        "<div style='width:30px'>#</div>"
+                        "<div style='width:300px'>Indicador</div>"
+                        "<div style='flex:1'>Impacto acumulado no mês</div>"
+                        "<div style='width:130px;text-align:right'>Acumulado (%)</div>"
+                        "<div style='width:80px;text-align:right'>Participação</div>"
+                        "</div>",
+                        unsafe_allow_html=True)
+
+                    vmax_mes = max((abs(r["impacto_total"]) for r in ranking_mes[:topn]), default=1) or 1
+                    html_mes = []
+                    for i, r in enumerate(ranking_mes[:topn], 1):
+                        w = abs(r["impacto_total"]) / vmax_mes * 100
+                        pos = r["impacto_total"] >= 0
+                        grad = ("linear-gradient(90deg,#1f8f7f,#3dd6c4)" if pos
+                                else "linear-gradient(90deg,#a83246,#ff7b8a)")
+                        tag = ("<span class='tag up'>↑</span>" if pos
+                               else "<span class='tag down'>↓</span>")
+                        sinal = "+" if pos else ""
+                        cor_v = "#48e0b6" if pos else "#ff7b8a"
+                        val_fmt = f"{r['impacto_total']:.2f}".replace(".", ",")
+                        part_fmt = f"{r['participacao']:.1f}"
+                        html_mes.append(
+                            f"<div class='rowit'>"
+                            f"<div class='rank'>{i}</div>"
+                            f"<div class='name' title=\"{r['indicador']}\">{r['indicador']}{tag}</div>"
+                            f"<div class='barwrap'><div class='bar' style='width:{w:.1f}%;background:{grad}'></div></div>"
+                            f"<div class='pct' style='width:130px;color:{cor_v}'>{sinal}{val_fmt}%</div>"
+                            f"<div class='pct' style='width:80px;color:var(--muted)'>{part_fmt}%</div>"
+                            f"</div>")
+                    st.markdown("".join(html_mes), unsafe_allow_html=True)
+
+                    df_mes = pd.DataFrame(ranking_mes)[["indicador", "impacto_total", "participacao", "n_pares"]]
+                    df_mes.columns = [
+                        "Indicador", "Impacto Acumulado (%)",
+                        "Participação no Total (%)", "Dias com Variação"]
+                    with st.expander("📋 Ver tabela completa do acumulado mensal / exportar"):
+                        st.dataframe(df_mes, use_container_width=True, height=420)
+                        st.download_button(
+                            "⬇️ Baixar ranking acumulado mensal (CSV)",
+                            df_mes.to_csv(index=False).encode("utf-8"),
+                            f"impacto_mensal_{data_inicio_mes}_{data_sel}.csv",
+                            "text/csv")
+
+        # ══════════════════════════════════════════════════════════════════════
+        with tab_sim:
+            st.markdown("### 🎛️ Simulador de Indicadores")
+            st.markdown(
+                f"<p class='legend'>Edite os valores do dia <b>{data_sel.strftime('%d/%m/%Y')}</b> "
+                f"na coluna editável e veja o impacto na Recuperação Industrial em tempo real. "
+                f"Clique duas vezes em uma célula da coluna do dia selecionado para alterar o valor.</p>",
+                unsafe_allow_html=True)
+
+            # Mapeamento nome -> lista de linhas (para reverse mapping em indicadores duplicados)
+            nome_to_rows_sim = {}
             for row in INPUT_ROWS:
-                nome = rotulo(row)
-                if nome in _EXCLUIR_IMPACTO:
+                nm = rotulo(row)
+                nome_to_rows_sim.setdefault(nm, []).append(row)
+
+            col_ant_lbl = (f"Dia Anterior ({data_ant.strftime('%d/%m/%Y')})"
+                           if data_ant else "Dia Anterior (—)")
+            col_sel_lbl = f"Dia Selecionado ({data_sel.strftime('%d/%m/%Y')})"
+
+            sim_rows_data = []
+            seen_sim = set()
+            for row in INPUT_ROWS:
+                nm = rotulo(row)
+                if nm in seen_sim:
                     continue
-                v_atual_i = entradas.get(row, 0.0)
-                v_ant_i   = entradas_ant.get(row, 0.0)
-                if v_atual_i == v_ant_i:
-                    continue
-                cenario = dict(entradas_ant)
-                cenario[row] = v_atual_i
-                y_mixed = recuperacao_industrial(cenario)
-                impacto_pp = y_mixed - y_ant_base
-                delta_i = v_atual_i - v_ant_i
-                delta_pct_i = delta_i / abs(v_ant_i) * 100 if v_ant_i != 0 else 0.0
-                impactos_raw.append({
-                    "linha": row,
-                    "indicador": nome,
-                    "valor_anterior": v_ant_i,
-                    "valor_atual": v_atual_i,
-                    "delta_abs": delta_i,
-                    "delta_pct": delta_pct_i,
-                    "impacto_pp": impacto_pp,
+                seen_sim.add(nm)
+                v_ant_s = float(entradas_ant.get(row, 0.0)) if entradas_ant else 0.0
+                v_sel_s = float(entradas.get(row, 0.0))
+                sim_rows_data.append({
+                    "Indicador": nm,
+                    col_ant_lbl: v_ant_s,
+                    col_sel_lbl: v_sel_s,
                 })
 
-            seen_imp = {}
-            for r in impactos_raw:
-                nome = r["indicador"]
-                if nome not in seen_imp or abs(r["impacto_pp"]) > abs(seen_imp[nome]["impacto_pp"]):
-                    seen_imp[nome] = r
-            impactos = list(seen_imp.values())
-            impactos.sort(key=lambda r: abs(r["impacto_pp"]), reverse=True)
+            df_sim_base = pd.DataFrame(sim_rows_data)
 
-            col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
-            with col_kpi1:
-                if impactos:
-                    top1 = impactos[0]
-                    if top1["indicador"] == "Quantidade Total Mel Final Tanque Nº5":
-                        delta_abs_top = entradas.get(176, 0.0) - entradas_ant.get(176, 0.0)
-                        lbl_variacao = "Volume Mel Final Tanque Nº5"
-                    else:
-                        delta_abs_top = top1["delta_abs"]
-                        lbl_variacao = top1["indicador"]
-                    sinal_tot = "+" if delta_abs_top >= 0 else ""
-                    cor_tot = "#48e0b6" if delta_abs_top >= 0 else "#ff7b8a"
-                    delta_abs_fmt = f"{delta_abs_top:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            sim_key = f"sim_{data_sel}_{periodo_sel}"
+            if st.button("↺ Resetar para valores originais", key=f"reset_{sim_key}"):
+                if sim_key in st.session_state:
+                    del st.session_state[sim_key]
+                st.rerun()
+
+            # KPI placeholder acima da tabela — preenchido após o editor
+            kpi_sim_ph = st.empty()
+
+            edited_df = st.data_editor(
+                df_sim_base,
+                column_config={
+                    "Indicador": st.column_config.TextColumn(
+                        "Indicador", disabled=True, width="large"),
+                    col_ant_lbl: st.column_config.NumberColumn(
+                        col_ant_lbl, disabled=True, format="%.6g", width="medium"),
+                    col_sel_lbl: st.column_config.NumberColumn(
+                        col_sel_lbl, format="%.6g", width="medium"),
+                },
+                use_container_width=True,
+                height=560,
+                key=sim_key,
+                hide_index=True,
+            )
+
+            # Reconstrói entradas com os valores editados
+            entradas_sim = dict(entradas)
+            for _, row_data in edited_df.iterrows():
+                nm = row_data["Indicador"]
+                val_ed = row_data[col_sel_lbl]
+                if pd.notna(val_ed):
+                    for r in nome_to_rows_sim.get(nm, []):
+                        entradas_sim[r] = float(val_ed)
+
+            y_sim = recuperacao_industrial(entradas_sim)
+            y_base_sim = recuperacao_industrial(entradas)
+            delta_sim = y_sim - y_base_sim
+
+            cor_sim = "#48e0b6" if delta_sim >= 0 else "#ff7b8a"
+            sinal_sim = "+" if delta_sim >= 0 else ""
+            y_sim_fmt = f"{y_sim:.4f}".replace(".", ",")
+            y_base_fmt = f"{y_base_sim:.4f}".replace(".", ",")
+            delta_fmt = f"{delta_sim:.4f}".replace(".", ",")
+
+            n_alt = sum(
+                1 for _, rd in edited_df.iterrows()
+                if abs(rd[col_sel_lbl] - df_sim_base.loc[
+                    df_sim_base["Indicador"] == rd["Indicador"], col_sel_lbl].values[0]) > 1e-9
+            )
+
+            with kpi_sim_ph:
+                cs1, cs2, cs3 = st.columns([1.4, 1, 1])
+                with cs1:
                     st.markdown(
-                        f"<div class='kpi'><div class='lbl'>Variação do indicador de maior impacto</div>"
-                        f"<div class='val' style='font-size:2.2rem;background:none;"
-                        f"-webkit-text-fill-color:{cor_tot}'>{sinal_tot}{delta_abs_fmt}</div>"
-                        f"<div class='sub'>{lbl_variacao}<br>{data_ant.strftime('%d/%m/%Y')} → {data_sel.strftime('%d/%m/%Y')}</div></div>",
+                        f"<div class='kpi'>"
+                        f"<div class='lbl'>Recuperação Industrial Simulada</div>"
+                        f"<div class='val'>{y_sim_fmt}%</div>"
+                        f"<div class='sub'>{data_sel.strftime('%d/%m/%Y')} · {periodo_sel}</div>"
+                        f"</div>",
                         unsafe_allow_html=True)
-            with col_kpi2:
-                if impactos:
-                    top_imp = impactos[0]
-                    sinal_top = "+" if top_imp["impacto_pp"] >= 0 else ""
-                    top_val_fmt = f"{top_imp['impacto_pp']:.2f}".replace(".", ",")
+                with cs2:
                     st.markdown(
-                        f"<div class='kpi'><div class='lbl'>Maior impacto isolado</div>"
-                        f"<div class='val' style='font-size:1.3rem'>{top_imp['indicador']}</div>"
-                        f"<div class='sub'>{sinal_top}{top_val_fmt}% na recuperação</div></div>",
+                        f"<div class='kpi'>"
+                        f"<div class='lbl'>Variação vs. dia selecionado</div>"
+                        f"<div class='val' style='background:none;-webkit-text-fill-color:{cor_sim}'>"
+                        f"{sinal_sim}{delta_fmt}%</div>"
+                        f"<div class='sub'>Base atual: {y_base_fmt}%</div>"
+                        f"</div>",
                         unsafe_allow_html=True)
-            with col_kpi3:
-                soma_top = sum(r["impacto_pp"] for r in impactos[:topn])
-                rec_ajustada = y_atual_total + soma_top
-                cor_aj = "#48e0b6" if rec_ajustada >= y_atual_total else "#ff7b8a"
-                rec_aj_fmt = f"{rec_ajustada:.2f}".replace(".", ",")
-                ri_fmt = f"{y_atual_total:.2f}".replace(".", ",")
-                sinal_soma = "+" if soma_top >= 0 else ""
-                soma_fmt = f"{soma_top:.2f}".replace(".", ",")
-                st.markdown(
-                    f"<div class='kpi'>"
-                    f"<div class='lbl'>Recuperação ajustada</div>"
-                    f"<div class='val' style='font-size:2.2rem;background:none;"
-                    f"-webkit-text-fill-color:{cor_aj}'>{rec_aj_fmt}%</div>"
-                    f"<div class='sub'>{ri_fmt}% base {sinal_soma}{soma_fmt}% (Δ top {topn})</div>"
-                    f"</div>",
-                    unsafe_allow_html=True)
-
-            if impactos:
-                vmax_imp = max((abs(r["impacto_pp"]) for r in impactos[:topn]), default=1) or 1
-                html_imp = []
-                for i, r in enumerate(impactos[:topn], 1):
-                    w = abs(r["impacto_pp"]) / vmax_imp * 100
-                    pos = r["impacto_pp"] >= 0
-                    grad = ("linear-gradient(90deg,#1f8f7f,#3dd6c4)" if pos
-                            else "linear-gradient(90deg,#a83246,#ff7b8a)")
-                    tag = ("<span class='tag up'>↑</span>" if pos
-                           else "<span class='tag down'>↓</span>")
-                    sinal = "+" if pos else ""
-                    cor_val = "#48e0b6" if pos else "#ff7b8a"
-                    val_fmt = f"{r['impacto_pp']:.2f}".replace(".", ",")
-                    html_imp.append(
-                        f"<div class='rowit'>"
-                        f"<div class='rank'>{i}</div>"
-                        f"<div class='name' title=\"{r['indicador']}\">{r['indicador']}{tag}</div>"
-                        f"<div class='barwrap'><div class='bar' style='width:{w:.1f}%;background:{grad}'></div></div>"
-                        f"<div class='pct' style='width:120px;color:{cor_val}'>{sinal}{val_fmt}%</div>"
-                        f"</div>")
-                st.markdown("".join(html_imp), unsafe_allow_html=True)
-
-                tab_imp = pd.DataFrame(impactos)[[
-                    "indicador", "valor_anterior", "valor_atual",
-                    "delta_abs", "delta_pct", "impacto_pp"]]
-                tab_imp.columns = [
-                    "Indicador",
-                    f"Valor {data_ant.strftime('%d/%m/%Y')}",
-                    f"Valor {data_sel.strftime('%d/%m/%Y')}",
-                    "Δ Indicador (abs)", "Δ Indicador (%)",
-                    "Impacto na Recuperação (%)"]
-                with st.expander("📋 Ver tabela completa de impactos / exportar"):
-                    st.dataframe(tab_imp, use_container_width=True, height=420)
-                    st.download_button(
-                        "⬇️ Baixar ranking de impactos (CSV)",
-                        tab_imp.to_csv(index=False).encode("utf-8"),
-                        f"impacto_recuperacao_{data_ant}_{data_sel}.csv",
-                        "text/csv")
-            else:
-                st.info("Nenhuma variação encontrada entre as duas datas para calcular impactos.")
+                with cs3:
+                    st.markdown(
+                        f"<div class='kpi'>"
+                        f"<div class='lbl'>Indicadores alterados</div>"
+                        f"<div class='val' style='font-size:2.5rem'>{n_alt}</div>"
+                        f"<div class='sub'>de {len(df_sim_base)} disponíveis</div>"
+                        f"</div>",
+                        unsafe_allow_html=True)
