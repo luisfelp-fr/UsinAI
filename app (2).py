@@ -478,7 +478,7 @@ with aba3:
         return (f"background-color: rgba(0,152,58,{0.12 + 0.78 * a:.2f}); "
                 f"color: {'#0e1b2a' if a > 0.55 else '#e6edf3'}")
 
-    sty = pivot.style.applymap(cor_verde).format("{:d}")
+    sty = pivot.style.map(cor_verde).format("{:d}")
     st.dataframe(sty, use_container_width=True)
 
     st.subheader("Matriz de prioridade: volume x criticidade")
