@@ -38,6 +38,8 @@ st.markdown("""
     .main .block-container {padding-top: 1.4rem; max-width: 1400px;}
 
     h1, h2, h3 {color:#8EC89A;}                        /* titulos em verde claro */
+    .stApp p, .stApp span, .stApp label {color:#e6edf3;}
+    [data-testid="stCaptionContainer"] p {color:#b0c4d8 !important; font-size:0.95rem;}
 
     div[data-testid="stMetric"] {
         background:#15273b; border:1px solid #25415c; border-radius:12px;
