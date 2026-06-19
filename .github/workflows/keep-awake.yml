@@ -1,0 +1,37 @@
+name: Keep Streamlit app awake
+
+# Mantem https://usinai-ops.streamlit.app/ acordado no Streamlit Community Cloud.
+# Roda a cada 4 horas (UTC) e tambem pode ser disparado manualmente na aba Actions.
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'   # a cada 4 horas (horario UTC)
+  workflow_dispatch:
+
+# Evita execucoes sobrepostas.
+concurrency:
+  group: keep-awake
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Playwright (Chromium)
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Visit app and wake it if asleep
+        env:
+          APP_URL: https://usinai-ops.streamlit.app/
+        run: python .github/scripts/keep_awake.py
