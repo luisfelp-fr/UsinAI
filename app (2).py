@@ -340,9 +340,10 @@ if dados.empty:
 # ----------------------------------------------------------------------------
 # Abas
 # ----------------------------------------------------------------------------
-aba1, aba2, aba3, aba4, aba5 = st.tabs(
+aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs(
     ["Visao Geral", "Analise de Criticidade", "Local x Criticidade",
-     "Abordagens Criticas", "Areas de Sugestao de GEMBA"])
+     "Abordagens Criticas", "Areas de Sugestao de GEMBA",
+     "Abordagens em GEMBA"])
 
 # ====================== ABA 1 - VISAO GERAL ======================
 with aba1:
@@ -633,3 +634,101 @@ with aba5:
         csv_g = tab.to_csv(index=False, sep=";", encoding="utf-8-sig").encode("utf-8-sig")
         st.download_button("Baixar priorizacao GEMBA (CSV)", csv_g,
                            file_name="areas_sugestao_gemba.csv", mime="text/csv")
+
+# ============= ABA 6 - ABORDAGENS EM GEMBA (CITACOES NO TEXTO) =============
+with aba6:
+    st.subheader("Abordagens realizadas durante GEMBA")
+    st.caption("Mapeia as abordagens cujo TEXTO menciona a palavra GEMBA - ou seja, "
+               "as observacoes feitas enquanto uma atividade de GEMBA (ida ao local) "
+               "estava sendo realizada. A busca ignora maiusculas/minusculas e acentos.")
+
+    c_term, c_opt = st.columns([1, 1.6])
+    termo = c_term.text_input("Palavra a procurar", value="GEMBA", key="gemba_termo")
+    incluir_ativ = c_opt.checkbox(
+        "Procurar tambem na descricao da atividade (alem da descricao da abordagem)",
+        value=False, key="gemba_incluir_ativ")
+
+    termo_norm = norm(termo).strip()
+    if not termo_norm:
+        st.info("Informe uma palavra para procurar.")
+    else:
+        padrao = re.compile(r"\b" + re.escape(termo_norm) + r"\b")
+
+        def cita(*textos):
+            alvo = norm(" ".join("" if pd.isna(t) else str(t) for t in textos))
+            return padrao.search(alvo) is not None
+
+        if incluir_ativ:
+            mask = [cita(b, a) for b, a in
+                    zip(dados["DescAbordagem"], dados["DescAtividade"])]
+        else:
+            mask = [cita(b) for b in dados["DescAbordagem"]]
+        mask = pd.Series(mask, index=dados.index)
+
+        gemba = dados[mask]
+        total = len(dados)
+        n_gemba = len(gemba)
+        rotulo = termo.strip().upper() or "GEMBA"
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Abordagens (filtro atual)", f"{total}")
+        m2.metric(f"Citam \"{rotulo}\"", f"{n_gemba}",
+                  f"{(n_gemba / total * 100 if total else 0):.0f}% do total")
+        crit_g = int(gemba["Faixa"].isin(["Alta", "Critica"]).sum())
+        m3.metric("Alta + Critica (entre as de GEMBA)", f"{crit_g}")
+        m4.metric("Criticidade media (GEMBA)",
+                  f"{gemba['Criticidade'].mean():.1f}" if n_gemba else "-")
+
+        if gemba.empty:
+            st.info(f"Nenhuma abordagem cita \"{rotulo}\" no texto, com os filtros atuais.")
+        else:
+            st.markdown("###")
+            g1, g2 = st.columns(2)
+            with g1:
+                st.subheader("Abordagens em GEMBA por processo (local)")
+                p = gemba.groupby("Processo").size().reset_index(name="Qtd")
+                p = rankear(p, "Processo", "Qtd")
+                st.bar_chart(p, x="Processo", y="Qtd", color=VERDE,
+                             horizontal=True, height=360)
+            with g2:
+                st.subheader("Abordagens em GEMBA por area")
+                a = gemba.groupby("Area").size().reset_index(name="Qtd")
+                a = rankear(a, "Area", "Qtd")
+                st.bar_chart(a, x="Area", y="Qtd", color=VERDE_CLARO,
+                             horizontal=True, height=360)
+
+            if gemba["Data"].notna().any():
+                st.subheader("Quando as abordagens em GEMBA aconteceram")
+                serie = (gemba.dropna(subset=["Data"])
+                         .groupby(pd.Grouper(key="Data", freq="W"))
+                         .size().reset_index(name="Qtd"))
+                st.bar_chart(serie, x="Data", y="Qtd", color=VERDE, height=280)
+
+            st.subheader("Abordagens que citam GEMBA (texto integral, sem nomes)")
+
+            def limpar(t):
+                return re.sub(r"<br\s*/?>", " ", str(t)).strip()
+
+            for _, r in gemba.sort_values("Criticidade", ascending=False).iterrows():
+                cor = CORES[str(r["Faixa"])]
+                data_txt = (r["Data"].strftime("%d/%m/%Y")
+                            if pd.notna(r["Data"]) else "sem data")
+                local = f"{r['Processo']} | {r['Subprocesso']}"
+                st.markdown(f"""
+<div class="crit-card" style="border-left-color:{cor}">
+  <span class="badge" style="background:{cor}">{r['Faixa']} - {r['Criticidade']:.0f}</span>
+  &nbsp;<b>{limpar(r['Atividade'])}</b>
+  &nbsp;<span style="color:#9fb0bf">| {data_txt} | Local: {local} |
+  {r['Publico']} | {r['EmpresaCod']}</span>
+  <div style="margin-top:8px"><b>Atividade:</b> {limpar(r['DescAtividade'])}</div>
+  <div style="margin-top:4px"><b>Abordagem:</b> {limpar(r['DescAbordagem'])}</div>
+</div>
+""", unsafe_allow_html=True)
+
+            exp = gemba[["Numero", "Data", "Area", "Processo", "Subprocesso",
+                         "Publico", "EmpresaCod", "Atividade", "Desvio",
+                         "Criticidade", "Faixa", "DescAtividade", "DescAbordagem"]].copy()
+            csv = exp.to_csv(index=False, sep=";", encoding="utf-8-sig").encode("utf-8-sig")
+            st.download_button("Baixar abordagens em GEMBA (CSV, sem nomes)", csv,
+                               file_name="abordagens_em_gemba.csv", mime="text/csv",
+                               key="dl_gemba")
