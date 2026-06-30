@@ -1,42 +1,24 @@
-# Analisador de Abordagens de Segurança (BBS)
+# UsinAI
 
-Aplicativo em Streamlit que importa uma planilha de observações comportamentais
-de segurança, calcula a **criticidade** de cada abordagem e a **cruza com o local**
-(Processo / Sub-processo / Área). Nenhum nome de pessoa é exibido nos dashboards;
-empresas parceiras são anonimizadas em códigos (Empresa 01, 02, ...).
+Coleção de aplicativos Streamlit organizados por área.
 
-## Instalação e execução
+## 📂 Estrutura
+
+| Pasta | Aplicativo | Descrição |
+|-------|------------|-----------|
+| [`Analisador RI/`](./Analisador%20RI/) | Analisador de Sensibilidade — Recuperação Industrial | Lê os indicadores diários, reconstrói a cadeia de cálculo da Recuperação Industrial e roda uma análise de sensibilidade, mostrando o % de influência de cada indicador. |
+| [`OPS/`](./OPS/) | Analisador de Abordagens de Segurança (BBS) | Importa observações comportamentais de segurança, calcula a criticidade de cada abordagem e cruza com o local (Processo / Sub-processo / Área). Veja o [README da pasta](./OPS/README.md). |
+
+## ▶️ Como executar
+
+Cada pasta é autocontida (tem seu próprio `app.py` e `requirements.txt`):
 
 ```bash
-pip install -r requirements.txt
-streamlit run app.py
+# Analisador RI
+pip install -r "Analisador RI/requirements.txt"
+streamlit run "Analisador RI/app.py"
+
+# OPS (BBS)
+pip install -r "OPS/requirements.txt"
+streamlit run "OPS/app.py"
 ```
-
-Abra o endereço exibido (geralmente http://localhost:8501) e importe a planilha.
-Aceita **Excel** (.xlsx, .xls, .xlsm) e **CSV** (detecta automaticamente encoding
-Latin-1/UTF-8 e separador `;` ou `,`).
-
-## Colunas reconhecidas
-
-Processo, Sub-processo, Área, Tipo, Público, Parceiro/Empresa, Desvio,
-Atividade Observada, Descrição da atividade, Descrição da abordagem, Data.
-Os nomes podem variar (com/sem acento); o app faz o mapeamento automático.
-
-## Como a criticidade é calculada (0 a 100)
-
-| Fator | Peso | Lógica |
-|-------|------|--------|
-| Risco da atividade observada | 5 | Altura, espaço confinado, bloqueio de energia e eletricidade pesam mais |
-| Gravidade do desvio | 4 | Trabalho sem ATC/ATE, linha de tiro, área de risco, EPI de altura são os mais graves |
-| Palavras-chave no texto | 3 | queda, energizado, vapor, pressão, explosão, choque, asfixia, etc. |
-| Comportamento inseguro | 3 | Marcação do tipo |
-
-Faixas: Baixa (<40), Média (40–59), Alta (60–79), Crítica (≥80).
-Os pesos e listas de palavras estão no topo do `app.py`, fáceis de ajustar.
-
-## Dashboards
-
-1. **Visão Geral** — KPIs, abordagens por processo, atividades observadas, faixas, famílias de desvio, evolução temporal.
-2. **Análise de Criticidade** — ranking de atividades mais críticas, criticidade por público e por empresa (anonimizada).
-3. **Local × Criticidade** — mapa de calor local × faixa e matriz de prioridade (volume × criticidade).
-4. **Abordagens Críticas** — texto integral das abordagens de maior risco (sem nomes) + exportação CSV.
