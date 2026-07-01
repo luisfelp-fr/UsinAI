@@ -1,6 +1,8 @@
 name: Keep Streamlit app awake
 
-# Mantem https://usinai-ops.streamlit.app/ acordado no Streamlit Community Cloud.
+# Mantem os apps do Streamlit Community Cloud acordados:
+#   - https://usinai-ops.streamlit.app/
+#   - https://usinai-espelho.streamlit.app/
 # Roda a cada 4 horas (UTC) e tambem pode ser disparado manualmente na aba Actions.
 
 on:
@@ -35,9 +37,9 @@ jobs:
           pip install playwright
           python -m playwright install --with-deps chromium
 
-      - name: Visit app and wake it if asleep
+      - name: Visit apps and wake them if asleep
         env:
-          APP_URL: https://usinai-ops.streamlit.app/
+          APP_URLS: https://usinai-ops.streamlit.app/,https://usinai-espelho.streamlit.app/
         run: python .github/scripts/keep_awake.py
 
       # Proteção anti-desativacao: o GitHub desativa workflows agendados apos
