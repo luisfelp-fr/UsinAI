@@ -8,6 +8,7 @@ Coleção de aplicativos Streamlit organizados por área.
 |-------|------------|-----------|
 | [`Analisador-RI/`](./Analisador-RI/) | Analisador de Sensibilidade — Recuperação Industrial | Lê os indicadores diários, reconstrói a cadeia de cálculo da Recuperação Industrial e roda uma análise de sensibilidade, mostrando o % de influência de cada indicador. |
 | [`OPS/`](./OPS/) | Analisador de Abordagens de Segurança (BBS) | Importa observações comportamentais de segurança, calcula a criticidade de cada abordagem e cruza com o local (Processo / Sub-processo / Área). Veja o [README da pasta](./OPS/README.md). |
+| [`Espelho-Simulacao/`](./Espelho-Simulacao/) | Espelho de Simulação | Importa o XML da simulação da usina e extrai os indicadores diários (aba SimDiária) e um fluxograma de processo com os mesmos dados (aba Visual), reproduzindo a planilha Modelo_Espelho. Veja o [README da pasta](./Espelho-Simulacao/README.md). |
 
 ## ▶️ Como executar
 
@@ -21,4 +22,8 @@ streamlit run Analisador-RI/app.py
 # OPS (BBS)
 pip install -r "OPS/requirements.txt"
 streamlit run "OPS/app.py"
+
+# Espelho de Simulação
+pip install -r Espelho-Simulacao/requirements.txt
+streamlit run Espelho-Simulacao/app.py
 ```
